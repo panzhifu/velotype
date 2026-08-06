@@ -3233,6 +3233,48 @@ mod tests {
     use crate::components::HtmlCssColor;
 
     #[test]
+    fn diag_asterisk_cjk_offset_map() {
+        let input = "*测试";
+        let tree = InlineTextTree::from_markdown(input);
+        let visible = tree.visible_text();
+        assert_eq!(visible, input, "visible text");
+        assert_eq!(
+            tree.fragments.len(),
+            1,
+            "expected single plain fragment, got {}",
+            tree.fragments.len()
+        );
+        for (i, f) in tree.fragments.iter().enumerate() {
+            eprintln!("fragment[{i}] text={:?} style={:?}", f.text, f.style);
+        }
+
+        let md = tree.serialize_markdown();
+        eprintln!("serialize_markdown = {md:?}");
+        let map = tree.markdown_offset_map();
+        eprintln!("visible_len={} markdown_len={}", visible.len(), md.len());
+        for off in 0..=visible.len() {
+            let m = map.visible_to_markdown_offset(off);
+            eprintln!("visible_to_markdown[{off}] = {m}");
+        }
+        for off in 0..=md.len() {
+            let v = map.markdown_to_visible_offset(off);
+            eprintln!("markdown_to_visible[{off}] = {v}");
+        }
+
+        // Try slicing the serialized markdown for every adjacent visible offset pair
+        // (char-boundary and interior-byte) to detect non-char-boundary panics.
+        for start in 0..=visible.len() {
+            for end in start..=visible.len() {
+                let ms = map.visible_to_markdown_offset(start);
+                let me = map.visible_to_markdown_offset(end);
+                if ms <= me && me <= md.len() {
+                    let _ = md.get(ms..me).expect("slice should be on char boundary");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn parses_supported_styles_and_serializes_canonically() {
         let tree = InlineTextTree::from_markdown("1**23**4*56*7<u>89</u>0***ab***<u>*cd*</u>");
         let serialized = tree.serialize_markdown();
