@@ -66,13 +66,13 @@ Velotype 目标支持 Windows、Linux 和 macOS。应用天然适合作为独立
 - 自动配置命令行工具 `velotype`
 
 > **如果使用 PKG 安装**：命令行工具在安装过程中已自动配置，可直接使用。PKG安装程序通过 `postinstall` / `preuninstall`脚本自动管理CLI链接。你仍然可以在使用时手动触发安装/卸载。
-> 
+>
 > **如果使用 .app 应用包**：可通过应用内菜单一键安装/卸载：
+>
 > 1. 打开 Velotype.app
 > 2. 点击菜单 **帮助 → 安装CLI命令**
 > 3. 输入管理员密码
 > 4. 完成！
-> 
 > 注意，如果你移动或删除了 `Velotype.app`，符号链接会自动失效，运行 `velotype` 会提示找不到命令。
 
 ### 2. 从源码构建
@@ -143,10 +143,10 @@ Velotype 将视觉主题和界面语言包拆分管理。主题文件可以覆�
 
 提交代码变更时，建议优先在 dev 分支进行开发并提供小补丁，并基于现有 parser/runtime 模型扩展，而不是整体替换现有实现。
 
+## Discord 频道
+
+欢迎各位用户、项目贡献者加入 Velotype 频道以获取更好的交流！[Discord link](https://discord.gg/AAdvntuAwE)
+
 ## 许可证
 
 Velotype 使用 [Apache License 2.0](../LICENSE)。
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=manyougz/velotype&type=date&legend=top-left)](https://api.star-history.com/chart?repos=manyougz/velotype&type=date&legend=top-left)

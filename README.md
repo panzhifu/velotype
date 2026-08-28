@@ -65,9 +65,10 @@ Two installation options are available:
 - Automatically installs to `/Applications`
 - Automatically configures command-line tool `velotype`
 
-> **If using the PKG installer:** The CLI command is configured automatically during installation. The PKG installer manages the symlink automatically via its `postinstall` / `preuninstall` scripts. You can still manually trigger installation/uninstallation while in use. 
-> 
+> **If using the PKG installer:** The CLI command is configured automatically during installation. The PKG installer manages the symlink automatically via its `postinstall` / `preuninstall` scripts. You can still manually trigger installation/uninstallation while in use.
+>
 > **If using the .app package:** Install or Uninstall the CLI command directly from the menu:
+>
 > 1. Open Velotype.app
 > 2. Click the menu **Help → Install CLI Command**
 > 3. Enter administrator password
@@ -143,10 +144,10 @@ This repository is still moving fast. When reporting parsing or rendering issues
 
 For code changes, we recommend developing on the `dev` branch first and keeping patches small. Please extend the existing parser/runtime model instead of replacing the current implementation wholesale.
 
+## Discord Channel
+
+Welcome all users and project contributors to join the Velotype channel for better communication! [Discord link](https://discord.gg/AAdvntuAwE)
+
 ## License
 
 Velotype is licensed under the [Apache License 2.0](LICENSE).
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=manyougz/velotype&type=date&legend=top-left)](https://api.star-history.com/chart?repos=manyougz/velotype&type=date&legend=top-left)

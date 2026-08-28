@@ -7,7 +7,7 @@ use gpui::{
     VisualTestContext,
 };
 
-use super::{Editor, ViewMode};
+use super::{Editor, MountedRun, ViewMode};
 use crate::components::{
     BlockKind, CloseWindow, FocusNext, ImageReferenceDefinitions, ImageResolvedSource,
     InlineTextTree, Newline, QuitApplication, SaveDocument, TableCellInlineImageSegment,
@@ -134,8 +134,37 @@ fn rendered_window_keeps_focus_row_mounted() {
     // Viewport at the top, caret parked far below at row 80.
     let window = Editor::rendered_window(&strides, 0.0, 400.0, 0.0, Some(80));
 
+    // The caret rides its own island; the rows above it stay culled.
     assert_eq!(window.run_start, 0);
-    assert_eq!(window.run_end, 81);
+    assert_eq!(window.run_end, 9);
+    let island = window.focus_island.expect("caret row stays mounted");
+    assert_eq!(island.row, 80);
+    assert!((island.lead_h - 3550.0).abs() < 0.01);
+}
+
+#[test]
+fn rendered_window_focus_above_run_does_not_widen_it() {
+    // Reading downward leaves the caret at the top of the document, so the rows
+    // between it and the viewport must stay culled.
+    let strides = uniform_strides(100, 50.0);
+    let window = Editor::rendered_window(&strides, 2000.0, 400.0, 0.0, Some(0));
+
+    assert_eq!(window.run_start, 39);
+    assert_eq!(window.run_end, 49);
+    let island = window.focus_island.expect("caret row stays mounted");
+    assert_eq!(island.row, 0);
+    assert_eq!(island.lead_h, 0.0);
+    assert!((window.top_h - 1900.0).abs() < 0.01);
+}
+
+#[test]
+fn rendered_window_focus_inside_run_needs_no_island() {
+    let strides = uniform_strides(100, 50.0);
+    let window = Editor::rendered_window(&strides, 2000.0, 400.0, 0.0, Some(42));
+
+    assert_eq!(window.run_start, 39);
+    assert_eq!(window.run_end, 49);
+    assert_eq!(window.focus_island, None);
 }
 
 #[test]
@@ -179,8 +208,11 @@ fn rendered_window_preserves_total_height() {
     ] {
         let window = Editor::rendered_window(&strides, scroll_y, viewport_height, 200.0, focus);
         let rendered: f32 = strides[window.run_start..window.run_end].iter().sum();
+        let island: f32 = window
+            .focus_island
+            .map_or(0.0, |island| island.lead_h + strides[island.row]);
         assert!(
-            (window.top_h + rendered + window.bottom_h - total).abs() < 0.01,
+            (window.top_h + rendered + island + window.bottom_h - total).abs() < 0.01,
             "height invariant broken at scroll {scroll_y}"
         );
     }
@@ -211,6 +243,144 @@ fn rendered_window_all_estimated_windows_near_top() {
     assert!(window.run_end < strides.len());
     // A viewport-plus-band worth of rows, not the whole document.
     assert!(window.run_end >= 20);
+}
+
+#[test]
+fn rendered_window_scrolled_past_estimates_mounts_trailing_run() {
+    // Rows the window has never mounted are lower bounds, so the scroll offset
+    // can sit past their running sum. The tail must still fill the viewport.
+    let strides = uniform_strides(100, 20.0); // total 2000
+    let window = Editor::rendered_window(&strides, 9000.0, 400.0, 200.0, None);
+
+    assert_eq!(window.run_end, 100);
+    assert_eq!(window.bottom_h, 0.0);
+    let mounted: f32 = strides[window.run_start..window.run_end].iter().sum();
+    assert!(
+        mounted >= 600.0,
+        "a viewport plus overdraw must stay mounted, got {mounted}px"
+    );
+}
+
+#[gpui::test]
+async fn footprints_are_dropped_when_the_scroll_column_changes_shape(cx: &mut TestAppContext) {
+    init_editor_test_app(cx);
+    // Footprints are read back by child index, so anything added to the scroll
+    // column would pair them with the wrong rows. The count has to be re-checked
+    // rather than assumed, or the mismatch is silent.
+    let markdown = (0..60)
+        .map(|index| format!("## Section {index}\n\nParagraph {index}.\n"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (editor, cx) = cx.add_window_view(|_window, cx| Editor::from_markdown(cx, markdown, None));
+    for _ in 0..3 {
+        redraw(cx);
+    }
+
+    editor.read_with(cx, |editor, _cx| {
+        let run = editor.prev_mounted_run.expect("a run was mounted");
+        assert!(
+            editor.mounted_run_is_addressable(run),
+            "the run the column just emitted must be readable"
+        );
+        for drift in [run.child_count + 1, run.child_count - 1] {
+            assert!(
+                !editor.mounted_run_is_addressable(MountedRun {
+                    child_count: drift,
+                    ..run
+                }),
+                "a column emitting {drift} children instead of {} must not be trusted",
+                run.child_count
+            );
+        }
+    });
+}
+
+#[gpui::test]
+async fn reading_to_the_bottom_leaves_the_caret_row_behind(cx: &mut TestAppContext) {
+    init_editor_test_app(cx);
+    // Scrolling never moves the caret, so it stays where the document loaded.
+    // The rows between it and the viewport must not ride along.
+    let markdown = (0..200)
+        .map(|index| format!("## Section {index}\n\nParagraph body for section {index}.\n"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (editor, cx) = cx.add_window_view(|_window, cx| Editor::from_markdown(cx, markdown, None));
+    for _ in 0..3 {
+        redraw(cx);
+    }
+
+    for _ in 0..10 {
+        editor.update(cx, |editor, _cx| {
+            let max = editor.scroll_handle.max_offset().height;
+            editor
+                .scroll_handle
+                .set_offset(gpui::point(gpui::px(0.0), -max));
+        });
+        redraw(cx);
+        redraw(cx);
+    }
+
+    editor.read_with(cx, |editor, _cx| {
+        let run = editor.prev_mounted_run.expect("a run was mounted");
+        let (run_start, run_end) = (run.row_start, run.row_end);
+        let rows = editor.document.visible_blocks().len();
+        assert!(
+            run_start > 0,
+            "the caret's row dragged the whole prefix on screen"
+        );
+        assert!(
+            run_end - run_start < rows / 4,
+            "{} of {rows} rows mounted at the bottom of the document",
+            run_end - run_start
+        );
+    });
+}
+
+#[gpui::test]
+async fn document_present_on_the_first_frame_is_measured_at_the_real_width(
+    cx: &mut TestAppContext,
+) {
+    init_editor_test_app(cx);
+    // Launching with a file renders one frame before the scroll bounds exist,
+    // collapsing the content column to its floor so every block wraps a
+    // character per line. Caching those footprints would size the document from
+    // a layout the reader never sees.
+    let markdown = (0..40)
+        .map(|index| {
+            format!(
+                "## Section {index}\n\nA paragraph with enough words in it to wrap many times over \
+                 once the content column narrows to a sliver.\n"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (editor, cx) = cx.add_window_view(|_window, cx| Editor::from_markdown(cx, markdown, None));
+
+    for _ in 0..4 {
+        redraw(cx);
+    }
+
+    editor.read_with(cx, |editor, _cx| {
+        let widest = editor
+            .row_stride_cache
+            .values()
+            .fold(0.0f32, |widest, stride| widest.max(*stride));
+        assert!(
+            widest > 0.0 && widest < 200.0,
+            "headings and one-line paragraphs cannot be {widest}px tall; \
+             the first frame's collapsed column was cached"
+        );
+        let run = editor.prev_mounted_run.expect("a run was mounted");
+        assert_eq!(
+            run.row_start, 0,
+            "the top of the document must stay mounted"
+        );
+        assert!(
+            run.row_end > 8,
+            "only {} rows mounted, so the viewport is mostly spacer",
+            run.row_end
+        );
+    });
 }
 
 #[test]

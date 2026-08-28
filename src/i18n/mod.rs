@@ -1230,7 +1230,7 @@ impl I18nStrings {
             update_open_release: "前往下载".into(),
             update_later: "稍后".into(),
             help_about_title: "关于 Velotype".into(),
-            help_about_message: "作者：manyougz".into(),
+            help_about_message: "作者：所有项目贡献者".into(),
             help_about_github_label: "GitHub".into(),
             help_about_star_message: "如果本项目对您有帮助，那不妨给本项目一颗 Star⭐，十分感谢！"
                 .into(),
@@ -1433,7 +1433,7 @@ impl I18nStrings {
             update_open_release: "Open Releases".into(),
             update_later: "Later".into(),
             help_about_title: "About Velotype".into(),
-            help_about_message: "Author: manyougz".into(),
+            help_about_message: "Author: All project contributors".into(),
             help_about_github_label: "GitHub".into(),
             help_about_star_message:
                 "If this project helps you, consider giving it a Star⭐. Thank you!".into(),

@@ -7,5 +7,5 @@ Icon=com.manyougz.Velotype
 Terminal=false
 Categories=Office;TextEditor;Utility;
 MimeType=text/markdown;text/x-markdown;
-StartupNotify=true
+StartupNotify=false
 StartupWMClass=com.manyougz.Velotype
