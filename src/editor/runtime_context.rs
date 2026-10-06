@@ -98,6 +98,17 @@ impl Editor {
         base_dir: Option<&Path>,
         cx: &mut Context<Self>,
     ) {
+        // Skipping a block whose context already matches is what keeps a single
+        // keystroke from re-rendering the whole document: this runs over every visible
+        // block after each text change, and notifying a block costs a rebuild of it.
+        if block.read(cx).runtime_context_is_current(
+            base_dir,
+            &self.image_reference_definitions,
+            &self.link_reference_definitions,
+            &self.footnote_registry,
+        ) {
+            return;
+        }
         let next_base_dir = base_dir.map(Path::to_path_buf);
         let image_reference_definitions = self.image_reference_definitions.clone();
         let link_reference_definitions = self.link_reference_definitions.clone();

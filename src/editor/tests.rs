@@ -9,7 +9,7 @@ use gpui::{
 
 use super::{Editor, MountedRun, ViewMode};
 use crate::components::{
-    BlockKind, CloseWindow, FocusNext, ImageReferenceDefinitions, ImageResolvedSource,
+    BlockEvent, BlockKind, CloseWindow, FocusNext, ImageReferenceDefinitions, ImageResolvedSource,
     InlineTextTree, Newline, QuitApplication, SaveDocument, TableCellInlineImageSegment,
     TableColumnAlignment, parse_table_cell_inline_images, superscript_ordinal,
 };
@@ -2097,6 +2097,121 @@ async fn callout_child_reference_style_image_uses_container_scoped_definition(
             )
         );
     });
+}
+
+/// Adding an image reference definition *after* the reference image already exists
+/// must still resolve that image. The editor pushes the parsed definitions into each
+/// block and skips blocks whose copy already matches, so a stale skip here would leave
+/// the image block holding the previous definition set.
+#[gpui::test]
+async fn typing_a_later_definition_resolves_an_earlier_reference_image(cx: &mut TestAppContext) {
+    let file_path = PathBuf::from("/workspace/docs/note.md");
+    let editor = cx.new(|cx| {
+        Editor::from_markdown(
+            cx,
+            "![diagram][anim]\n\n[todo]: ./placeholder.png".to_string(),
+            Some(file_path),
+        )
+    });
+
+    editor.read_with(cx, |editor, cx| {
+        let image_block = editor.document.visible_blocks()[0].entity.clone();
+        assert!(
+            image_block.read(cx).image_runtime().is_none(),
+            "the reference has no definition yet"
+        );
+    });
+
+    editor.update(cx, |editor, cx| {
+        let definition_block = editor.document.visible_blocks()[1].entity.clone();
+        let definition_len = definition_block.read(cx).visible_len();
+        definition_block.update(cx, |block, block_cx| {
+            block.replace_text_in_visible_range(
+                0..definition_len,
+                "[anim]: ./assets/diagram.png",
+                None,
+                false,
+                block_cx,
+            );
+        });
+    });
+
+    editor.read_with(cx, |editor, cx| {
+        let image_block = editor.document.visible_blocks()[0].entity.clone();
+        let runtime = image_block
+            .read(cx)
+            .image_runtime()
+            .expect("a definition added later resolves the earlier reference image");
+        assert_eq!(runtime.alt, "diagram");
+        assert_eq!(runtime.src, "./assets/diagram.png");
+        assert_eq!(
+            runtime.resolved_source,
+            ImageResolvedSource::Local(PathBuf::from("/workspace/docs/assets/diagram.png"))
+        );
+    });
+}
+
+/// A block created after import starts with an empty runtime context and has to be
+/// filled in, otherwise a reference image typed into it can never resolve.
+#[gpui::test]
+async fn a_block_split_off_after_import_resolves_reference_images(cx: &mut TestAppContext) {
+    init_editor_test_app(cx);
+    let file_path = PathBuf::from("/workspace/docs/note.md");
+    // The definition has to stay in the document, and an unreferenced definition does
+    // not survive import, so a first image already points at it.
+    let (editor, vcx) = cx.add_window_view(move |_window, cx| {
+        Editor::from_markdown(
+            cx,
+            "![first][anim]\n\n[anim]: ./assets/diagram.png".to_string(),
+            Some(file_path),
+        )
+    });
+    redraw(vcx);
+
+    // Splitting a block off the image paragraph goes through the same editor event the
+    // Enter key raises, so the new block's runtime context comes from the push being
+    // tested here.
+    let new_block = vcx.update(|_window, app| {
+        editor.update(app, |editor, cx| {
+            let first_block = editor.document.visible_blocks()[0].entity.clone();
+            editor.on_block_event(
+                first_block,
+                &BlockEvent::RequestNewline {
+                    trailing: InlineTextTree::plain(String::new()),
+                    source_already_mutated: false,
+                },
+                cx,
+            );
+            let blocks = editor.document.visible_blocks();
+            let candidate = blocks[1].entity.clone();
+            assert_eq!(
+                candidate.read(cx).kind(),
+                BlockKind::Paragraph,
+                "the split-off block should be a paragraph"
+            );
+            assert_eq!(
+                candidate.read(cx).display_text(),
+                "",
+                "the split-off block starts empty"
+            );
+            candidate
+        })
+    });
+    redraw(vcx);
+
+    new_block.update(vcx, |block, block_cx| {
+        block.replace_text_in_visible_range(0..0, "![second][anim]", None, false, block_cx);
+    });
+    redraw(vcx);
+
+    let runtime = new_block
+        .read_with(vcx, |block, _| block.image_runtime().cloned())
+        .expect("a reference image typed into a freshly created block resolves");
+    assert_eq!(runtime.alt, "second");
+    assert_eq!(
+        runtime.resolved_source,
+        ImageResolvedSource::Local(PathBuf::from("/workspace/docs/assets/diagram.png"))
+    );
 }
 
 #[gpui::test]

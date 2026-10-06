@@ -320,6 +320,32 @@ impl Block {
         self.sync_image_runtime();
     }
 
+    /// Whether the block already carries exactly this runtime context. Pushing
+    /// unchanged values would still notify the block, and the editor rebuilds this
+    /// context after *every* text change, so notifying on equality turns one keystroke
+    /// into a whole-document re-render. Pointer identity covers the case where the
+    /// editor kept the same parsed definitions; otherwise the parsed values are
+    /// compared by content.
+    pub(crate) fn runtime_context_is_current(
+        &self,
+        base_dir: Option<&Path>,
+        image_reference_definitions: &Arc<ImageReferenceDefinitions>,
+        link_reference_definitions: &Arc<LinkReferenceDefinitions>,
+        footnote_registry: &Arc<FootnoteRegistry>,
+    ) -> bool {
+        fn same<T: PartialEq>(current: &Arc<T>, next: &Arc<T>) -> bool {
+            Arc::ptr_eq(current, next) || **current == **next
+        }
+
+        self.image_base_dir.as_deref() == base_dir
+            && same(
+                &self.image_reference_definitions,
+                image_reference_definitions,
+            )
+            && same(&self.link_reference_definitions, link_reference_definitions)
+            && same(&self.footnote_registry, footnote_registry)
+    }
+
     pub(crate) fn uses_raw_text_editing(&self) -> bool {
         self.edit_mode.uses_raw_text_editing()
     }
