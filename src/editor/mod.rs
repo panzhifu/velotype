@@ -142,6 +142,12 @@ pub struct Editor {
     redo_history: Vec<HistoryEntry>,
     pending_undo_capture: Option<PendingUndoCapture>,
     last_selection_snapshot: UndoSelectionSnapshot,
+    /// Inputs the stored `last_selection_snapshot` was captured from, or `None`
+    /// when it must be captured again.
+    selection_snapshot_key: Option<SelectionSnapshotKey>,
+    /// Bumped by every source mutation so a stale selection snapshot cannot survive a
+    /// change to the text before the caret.
+    source_change_revision: u64,
     last_stable_source_text: String,
     history_restore_in_progress: bool,
     image_reference_definitions: Arc<ImageReferenceDefinitions>,
@@ -234,6 +240,21 @@ struct HistoryEntry {
 #[derive(Clone, Debug)]
 struct PendingUndoCapture {
     snapshot: HistoryEntry,
+}
+
+/// The inputs `Editor::capture_source_selection_snapshot` reads. Capturing rebuilds the
+/// source offset map of every block, so a render frame re-captures only when one of these
+/// differs from the values the stored snapshot was built from.
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct SelectionSnapshotKey {
+    source_change_revision: u64,
+    root_count: usize,
+    visible_count: usize,
+    view_mode: ViewMode,
+    edit_target: Option<EntityId>,
+    selected_range: Option<std::ops::Range<usize>>,
+    selection_reversed: bool,
+    cross_block_selection: Option<CrossBlockSelection>,
 }
 
 /// Cross-block selection endpoint in visible block order.
@@ -369,6 +390,8 @@ impl Editor {
             redo_history: Vec::new(),
             pending_undo_capture: None,
             last_selection_snapshot: Self::empty_selection_snapshot(),
+            selection_snapshot_key: None,
+            source_change_revision: 0,
             last_stable_source_text: normalized,
             history_restore_in_progress: false,
             image_reference_definitions: Arc::default(),

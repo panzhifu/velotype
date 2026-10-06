@@ -2783,6 +2783,66 @@ async fn fresh_edit_clears_pending_redo_history(cx: &mut TestAppContext) {
     });
 }
 
+/// A caret move that changes no text reaches the undo history only through the snapshot
+/// refreshed while rendering, so undo must put the caret where the user had moved it.
+#[gpui::test]
+async fn undo_after_a_caret_move_without_edits_restores_the_moved_position(
+    cx: &mut TestAppContext,
+) {
+    init_editor_test_app(cx);
+    let (editor, vcx) = cx.add_window_view(|_window, cx| {
+        Editor::from_markdown(cx, "alpha\n\nbeta\n\ngamma".to_string(), None)
+    });
+    redraw(vcx);
+
+    // Move the caret inside the first block: no text changes, so only a frame can carry
+    // this position into the undo snapshot.
+    editor.update(vcx, |editor, cx| {
+        let block = editor.document.visible_blocks()[0].entity.clone();
+        editor.active_entity_id = Some(block.entity_id());
+        block.update(cx, |block, _cx| {
+            block.selected_range = 3..3;
+        });
+    });
+    redraw(vcx);
+
+    editor.update(vcx, |editor, cx| {
+        let block = editor.document.visible_blocks()[0].entity.clone();
+        block.update(cx, |block, block_cx| {
+            block.prepare_undo_capture(
+                crate::components::UndoCaptureKind::CoalescibleText,
+                block_cx,
+            );
+            block.replace_text_in_visible_range(3..3, "X", None, false, block_cx);
+        });
+    });
+    redraw(vcx);
+
+    editor.update(vcx, |editor, cx| {
+        assert_eq!(
+            editor.document.visible_blocks()[0]
+                .entity
+                .read(cx)
+                .display_text(),
+            "alpXha",
+            "the edit should have landed before undo runs"
+        );
+        editor.undo_document(cx);
+    });
+    redraw(vcx);
+
+    editor.read_with(vcx, |editor, cx| {
+        let block = editor.document.visible_blocks()[0].entity.clone();
+        let block = block.read(cx);
+        assert_eq!(block.display_text(), "alpha", "undo restores the text");
+        assert_eq!(
+            block.selected_range,
+            3..3,
+            "undo must restore the caret the user moved to before typing"
+        );
+    });
+}
+
 #[gpui::test]
 async fn toggle_view_mode_preserves_paragraph_caret_position(cx: &mut TestAppContext) {
     let editor = cx.new(|cx| Editor::from_markdown(cx, "alpha\n\nbeta".to_string(), None));

@@ -1496,7 +1496,7 @@ impl Render for Editor {
         self.install_close_guard(cx, window);
         self.apply_pending_focus(window, cx);
         self.apply_pending_scroll_into_view(window, cx);
-        self.last_selection_snapshot = self.capture_source_selection_snapshot(cx);
+        self.refresh_selection_snapshot_for_frame(cx);
         self.sync_pending_save(window, cx);
         self.sync_pending_save_as(window, cx);
         self.sync_pending_open_link(window, cx);

@@ -56,6 +56,48 @@ impl Editor {
         }
     }
 
+    /// Samples the inputs that decide what `capture_source_selection_snapshot` returns:
+    /// the view, the caret's block and range, any cross-block selection, and a revision
+    /// bumped by every source mutation.
+    pub(super) fn current_selection_snapshot_key(&self, cx: &App) -> SelectionSnapshotKey {
+        let target = self.current_edit_target_from_state(cx);
+        let (selected_range, selection_reversed) = match target.as_ref() {
+            Some(block) => {
+                let block = block.read(cx);
+                (Some(block.selected_range.clone()), block.selection_reversed)
+            }
+            None => (None, false),
+        };
+        SelectionSnapshotKey {
+            source_change_revision: self.source_change_revision,
+            root_count: self.document.root_count(),
+            visible_count: self.document.visible_blocks().len(),
+            view_mode: self.view_mode,
+            edit_target: target.as_ref().map(|block| block.entity_id()),
+            selected_range,
+            selection_reversed,
+            cross_block_selection: self.cross_block_selection,
+        }
+    }
+
+    /// Captures the selection snapshot and records which inputs it was built from.
+    pub(super) fn store_selection_snapshot(&mut self, cx: &App) {
+        self.selection_snapshot_key = Some(self.current_selection_snapshot_key(cx));
+        self.last_selection_snapshot = self.capture_source_selection_snapshot(cx);
+    }
+
+    /// Keeps the stored snapshot while nothing it depends on has changed. Capturing
+    /// rebuilds the source offset map of every block, which costs milliseconds per frame
+    /// on a long document even when the caret and text are untouched.
+    pub(super) fn refresh_selection_snapshot_for_frame(&mut self, cx: &App) {
+        let key = self.current_selection_snapshot_key(cx);
+        if self.selection_snapshot_key.as_ref() == Some(&key) {
+            return;
+        }
+        self.selection_snapshot_key = Some(key);
+        self.last_selection_snapshot = self.capture_source_selection_snapshot(cx);
+    }
+
     pub(super) fn capture_history_entry(&self, kind: UndoCaptureKind, cx: &App) -> HistoryEntry {
         HistoryEntry {
             source_text: self.current_document_source(cx),
@@ -93,7 +135,7 @@ impl Editor {
     }
 
     pub(super) fn refresh_stable_document_snapshot(&mut self, cx: &App) {
-        self.last_selection_snapshot = self.capture_source_selection_snapshot(cx);
+        self.store_selection_snapshot(cx);
         self.last_stable_source_text = self.current_document_source(cx);
     }
 
