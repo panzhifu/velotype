@@ -205,17 +205,29 @@ impl Editor {
             }
         }
 
-        self.footnote_registry = Arc::new(FootnoteRegistry {
+        // Reusing the previous Arc when the freshly parsed value is equal turns each
+        // block's "is my context current" test into a pointer comparison. Without this,
+        // every block re-compares the same maps by content on every text change.
+        let footnote_registry = Arc::new(FootnoteRegistry {
             bindings,
             block_occurrences,
         });
+        if *footnote_registry != *self.footnote_registry {
+            self.footnote_registry = footnote_registry;
+        }
     }
 
     pub(super) fn rebuild_image_runtimes(&mut self, cx: &mut Context<Self>) {
         let base_dir = self.image_base_dir();
         let markdown = self.document.markdown_text(cx);
-        self.image_reference_definitions = Arc::new(parse_image_reference_definitions(&markdown));
-        self.link_reference_definitions = Arc::new(parse_link_reference_definitions(&markdown));
+        let image_reference_definitions = Arc::new(parse_image_reference_definitions(&markdown));
+        if *image_reference_definitions != *self.image_reference_definitions {
+            self.image_reference_definitions = image_reference_definitions;
+        }
+        let link_reference_definitions = Arc::new(parse_link_reference_definitions(&markdown));
+        if *link_reference_definitions != *self.link_reference_definitions {
+            self.link_reference_definitions = link_reference_definitions;
+        }
         self.rebuild_footnote_registry(cx);
         let visible = self.document.visible_blocks().to_vec();
         for visible_block in visible {
