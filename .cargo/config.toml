@@ -1,0 +1,7 @@
+# Cargo reports proc-macro-error2 2.0.1 re-exporting a private `proc_macro`
+# (rust-lang/rust#127909). That crate only reaches this build through
+# gpui 0.2.2 -> stacksafe 0.1.4 -> stacksafe-macro 0.1.4, gpui pins stacksafe to
+# "0.1", and stacksafe 1.x is the line that dropped the dependency, so no version
+# bump available here removes it. Silence the report until gpui moves to stacksafe 1.x.
+[future-incompat-report]
+frequency = "never"

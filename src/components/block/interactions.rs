@@ -361,6 +361,21 @@ impl Block {
             return;
         }
 
+        // An empty line inside a blockquote exits the quote on Enter, the same way an
+        // empty list item outdents. `visible_quote_depth` excludes callout nesting, so
+        // callout bodies keep growing paragraphs inside the callout instead of leaving
+        // it. Childless only, because outdenting a quote container would convert the
+        // whole container and drop the blocks nested in it.
+        if self.selected_range.is_empty()
+            && self.is_empty()
+            && self.children.is_empty()
+            && (self.kind() == BlockKind::Quote
+                || (self.visible_quote_depth > 0 && !self.is_direct_list_child()))
+        {
+            cx.emit(BlockEvent::RequestOutdent);
+            return;
+        }
+
         if self.kind() == BlockKind::Quote {
             if !self.selected_range.is_empty() {
                 self.replace_text_in_range(None, "", window, cx);

@@ -4646,6 +4646,129 @@ mod tests {
         });
     }
 
+    /// Presses Enter on the first childless block matching `matches`. The entity is
+    /// fetched in the same update round as the keypress, because a handle taken from an
+    /// earlier round stops resolving in the document snapshot once a rebuild has swapped
+    /// the block out.
+    fn press_enter_where(
+        editor: &Entity<Editor>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+        matches: impl Fn(&Block) -> bool,
+    ) {
+        let target = editor.update(cx, |editor, cx| {
+            editor
+                .document
+                .visible_blocks()
+                .iter()
+                .find(|entry| {
+                    let block = entry.entity.read(cx);
+                    block.children.is_empty() && matches(block)
+                })
+                .expect("no childless block matched the predicate")
+                .entity
+                .clone()
+        });
+        target.update(cx, |block, block_cx| {
+            block.move_to(block.visible_len(), block_cx);
+            block.on_newline(&Newline, window, block_cx);
+        });
+    }
+
+    #[gpui::test]
+    async fn enter_on_empty_quoted_line_exits_quote(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let editor = cx.new(|cx| Editor::from_markdown(cx, "> first".to_string(), None));
+
+        // First Enter appends an empty quoted line inside the same group.
+        cx.update(|window, cx| {
+            press_enter_where(&editor, window, cx, |block| block.quote_depth == 1);
+        });
+        editor.update(cx, |editor, cx| {
+            let visible = editor.document.visible_blocks();
+            assert_eq!(visible.len(), 2);
+            assert_eq!(visible[1].entity.read(cx).quote_depth, 1);
+        });
+
+        // Second Enter on that empty line leaves the quote.
+        cx.update(|window, cx| {
+            press_enter_where(&editor, window, cx, |block| block.quote_depth == 1);
+        });
+
+        editor.update(cx, |editor, cx| {
+            let visible = editor.document.visible_blocks();
+            assert_eq!(visible.len(), 2);
+            assert_eq!(visible[0].entity.read(cx).kind(), BlockKind::Quote);
+            assert_eq!(visible[0].entity.read(cx).children.len(), 0);
+            assert_eq!(visible[1].entity.read(cx).kind(), BlockKind::Paragraph);
+            assert_eq!(visible[1].entity.read(cx).quote_depth, 0);
+            assert_eq!(editor.document.root_count(), 2);
+            assert_eq!(editor.document.markdown_text(cx), "> first\n\n");
+        });
+    }
+
+    #[gpui::test]
+    async fn enter_on_empty_nested_quote_line_drops_one_quote_level(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let editor = cx.new(|cx| Editor::from_markdown(cx, "> > first".to_string(), None));
+
+        cx.update(|window, cx| {
+            press_enter_where(&editor, window, cx, |block| block.quote_depth == 2);
+        });
+        cx.update(|window, cx| {
+            press_enter_where(&editor, window, cx, |block| block.quote_depth == 2);
+        });
+
+        editor.update(cx, |editor, cx| {
+            assert_eq!(editor.document.root_count(), 1);
+            let empty_line = editor
+                .document
+                .visible_blocks()
+                .iter()
+                .find(|entry| {
+                    let block = entry.entity.read(cx);
+                    block.kind() == BlockKind::Paragraph && block.display_text().is_empty()
+                })
+                .expect("empty line below the nested quote")
+                .entity
+                .clone();
+            assert_eq!(empty_line.read(cx).quote_depth, 1);
+            assert_eq!(editor.document.markdown_text(cx), "> > first\n> ");
+        });
+    }
+
+    #[gpui::test]
+    async fn enter_on_empty_callout_body_line_stays_in_callout(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let editor =
+            cx.new(|cx| Editor::from_markdown(cx, "> [!NOTE] note body".to_string(), None));
+
+        // Enter on the callout header opens a body line, and Enter again on that empty
+        // body line must stay inside the callout: a callout counts towards `quote_depth`
+        // but not towards `visible_quote_depth`, which is what the quote exit tests on.
+        cx.update(|window, cx| {
+            press_enter_where(&editor, window, cx, |block| block.kind().is_callout());
+        });
+        cx.update(|window, cx| {
+            press_enter_where(&editor, window, cx, |block| {
+                block.callout_depth > 0 && block.display_text().is_empty()
+            });
+        });
+
+        editor.update(cx, |editor, cx| {
+            assert_eq!(editor.document.root_count(), 1);
+            let callout = editor.document.first_root().expect("root callout").clone();
+            assert!(callout.read(cx).kind().is_callout());
+            assert_eq!(callout.read(cx).children.len(), 2);
+            assert!(
+                editor
+                    .document
+                    .markdown_text(cx)
+                    .starts_with("> [!NOTE] note body")
+            );
+        });
+    }
+
     #[gpui::test]
     async fn multiline_edit_inside_quote_reparses_into_child_blocks(cx: &mut TestAppContext) {
         let editor = cx.new(|cx| Editor::from_markdown(cx, "> first".to_string(), None));

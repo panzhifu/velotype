@@ -1130,7 +1130,10 @@ mod tests {
                 Some("pha\n\nbeta\n\nga")
             );
         });
-        cx.quit();
+        // No `cx.quit()`: with gpui 0.2.2, `TestAppContext::quit` -> `App::shutdown`
+        // segfaults while dropping a window created by `add_window_view` (reproducible
+        // with a `div()`-only view, no Editor involved). Dropping the context tears the
+        // window down safely, which is also what the `#[gpui::test]` path relies on.
     }
 
     const TABLE_DOC: &str = "alpha\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\ngamma";
