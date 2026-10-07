@@ -1,10 +1,59 @@
 //! Source-offset mapping between canonical Markdown and rendered blocks.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use super::*;
 
 impl Editor {
+    /// The document's serialized text for the current view, built at most once per
+    /// revision. One text change asks for the whole document several times — the undo
+    /// entry, the stable snapshot, the comparison that decides whether to push it, the
+    /// reference-definition rebuild, and the status bar word count — and serializing a
+    /// long document costs milliseconds each time. The key pairs the revision bumped by
+    /// `mark_dirty` with the view mode and block counts, so text edits, view switches and
+    /// structural changes all read as a miss.
+    pub(super) fn cached_document_source(&mut self, cx: &App) -> Arc<str> {
+        let key: DocumentSourceCacheKey = (
+            self.source_change_revision,
+            self.view_mode,
+            self.document.root_count(),
+            self.document.visible_blocks().len(),
+        );
+        if let Some((cached_key, text)) = self.document_source_cache.as_ref() {
+            if *cached_key == key {
+                return text.clone();
+            }
+        }
+
+        let text: Arc<str> = match self.view_mode {
+            ViewMode::Rendered => self.document.markdown_text(cx).into(),
+            ViewMode::Source => self.document.raw_source_text(cx).into(),
+        };
+        self.document_source_cache = Some((key, text.clone()));
+        text
+    }
+
+    /// Records that the document is about to change: the cached whole-document text is
+    /// dropped and the revision that invalidates the stored selection snapshot moves on.
+    /// Called once at the head of every content-changing operation, before any reader in
+    /// that operation serializes, so the change costs one serialization and not several.
+    pub(super) fn note_document_change(&mut self) {
+        self.source_change_revision += 1;
+        self.document_source_cache = None;
+    }
+
+    /// Replaces every root block and drops the cached whole-document text, because a
+    /// document swap emits no block event for it to react to.
+    pub(super) fn replace_document_roots(
+        &mut self,
+        roots: Vec<Entity<Block>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.note_document_change();
+        self.document.replace_roots(roots, cx);
+    }
+
     pub(super) fn current_document_source(&self, cx: &App) -> String {
         match self.view_mode {
             ViewMode::Rendered => self.document.markdown_text(cx),

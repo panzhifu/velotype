@@ -1290,6 +1290,9 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         if Self::block_event_clears_cross_block_selection(event) {
+            // The block is about to change the document; record it before any reader in
+            // this event serializes, so the new text is built once and shared.
+            self.note_document_change();
             self.rendered_select_all_cycle = None;
             self.clear_cross_block_selection(cx);
         }
@@ -1612,6 +1615,9 @@ impl Editor {
         }
 
         if Self::block_event_clears_cross_block_selection(event) {
+            // The block is about to change the document; record it before any reader in
+            // this event serializes, so the new text is built once and shared.
+            self.note_document_change();
             self.rendered_select_all_cycle = None;
             self.clear_cross_block_selection(cx);
         }

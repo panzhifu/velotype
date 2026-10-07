@@ -98,9 +98,13 @@ impl Editor {
         self.last_selection_snapshot = self.capture_source_selection_snapshot(cx);
     }
 
-    pub(super) fn capture_history_entry(&self, kind: UndoCaptureKind, cx: &App) -> HistoryEntry {
+    pub(super) fn capture_history_entry(
+        &mut self,
+        kind: UndoCaptureKind,
+        cx: &App,
+    ) -> HistoryEntry {
         HistoryEntry {
-            source_text: self.current_document_source(cx),
+            source_text: self.cached_document_source(cx).to_string(),
             selection: self.capture_source_selection_snapshot(cx),
             timestamp: Instant::now(),
             kind,
@@ -136,7 +140,7 @@ impl Editor {
 
     pub(super) fn refresh_stable_document_snapshot(&mut self, cx: &App) {
         self.store_selection_snapshot(cx);
-        self.last_stable_source_text = self.current_document_source(cx);
+        self.last_stable_source_text = self.cached_document_source(cx).to_string();
     }
 
     pub(super) fn finalize_pending_undo_capture(&mut self, cx: &mut Context<Self>) {
@@ -150,8 +154,8 @@ impl Editor {
             return;
         };
 
-        let current_source = self.current_document_source(cx);
-        if current_source == pending.snapshot.source_text {
+        let current_source = self.cached_document_source(cx);
+        if current_source.as_ref() == pending.snapshot.source_text.as_str() {
             self.refresh_stable_document_snapshot(cx);
             return;
         }
@@ -319,14 +323,14 @@ impl Editor {
                 if roots.is_empty() {
                     roots.push(Self::new_block(cx, BlockRecord::paragraph(String::new())));
                 }
-                self.document.replace_roots(roots, cx);
+                self.replace_document_roots(roots, cx);
                 self.rebuild_table_runtimes(cx);
                 self.rebuild_image_runtimes(cx);
             }
             ViewMode::Source => {
                 let block = Self::new_block(cx, BlockRecord::paragraph(entry.source_text.clone()));
                 block.update(cx, |block, _cx| block.set_source_document_mode());
-                self.document.replace_roots(vec![block], cx);
+                self.replace_document_roots(vec![block], cx);
                 self.table_cells.clear();
             }
         }
@@ -349,7 +353,7 @@ impl Editor {
         if roots.is_empty() {
             roots.push(Self::new_block(cx, BlockRecord::paragraph(String::new())));
         }
-        self.document.replace_roots(roots, cx);
+        self.replace_document_roots(roots, cx);
         self.rebuild_table_runtimes(cx);
         self.rebuild_image_runtimes(cx);
         self.apply_selection_snapshot_in_current_mode(&selection_snapshot, cx);

@@ -219,7 +219,7 @@ impl Editor {
 
     pub(super) fn rebuild_image_runtimes(&mut self, cx: &mut Context<Self>) {
         let base_dir = self.image_base_dir();
-        let markdown = self.document.markdown_text(cx);
+        let markdown = self.cached_document_source(cx);
         let image_reference_definitions = Arc::new(parse_image_reference_definitions(&markdown));
         if *image_reference_definitions != *self.image_reference_definitions {
             self.image_reference_definitions = image_reference_definitions;

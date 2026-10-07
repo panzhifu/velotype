@@ -64,7 +64,7 @@ impl Editor {
         }
 
         if prefs.show_word_count {
-            let text = self.serialized_document_text(cx);
+            let text = self.cached_document_source(cx);
             let total_count = count_words(&text);
             let selection_count = self.selected_markdown_text(cx).as_deref().map(count_words);
             right_items.push(render_word_count(

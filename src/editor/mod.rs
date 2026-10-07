@@ -148,6 +148,8 @@ pub struct Editor {
     /// Bumped by every source mutation so a stale selection snapshot cannot survive a
     /// change to the text before the caret.
     source_change_revision: u64,
+    /// See `DocumentSourceCache`.
+    document_source_cache: DocumentSourceCache,
     last_stable_source_text: String,
     history_restore_in_progress: bool,
     image_reference_definitions: Arc<ImageReferenceDefinitions>,
@@ -241,6 +243,14 @@ struct HistoryEntry {
 struct PendingUndoCapture {
     snapshot: HistoryEntry,
 }
+
+/// The state a cached whole-document text was built from: the change revision, the view
+/// mode, and the root and visible block counts.
+type DocumentSourceCacheKey = (u64, ViewMode, usize, usize);
+
+/// The whole-document text plus the key it was built from, so one change does not
+/// serialize the document once per reader.
+type DocumentSourceCache = Option<(DocumentSourceCacheKey, Arc<str>)>;
 
 /// The inputs `Editor::capture_source_selection_snapshot` reads. Capturing rebuilds the
 /// source offset map of every block, so a render frame re-captures only when one of these
@@ -392,6 +402,7 @@ impl Editor {
             last_selection_snapshot: Self::empty_selection_snapshot(),
             selection_snapshot_key: None,
             source_change_revision: 0,
+            document_source_cache: None,
             last_stable_source_text: normalized,
             history_restore_in_progress: false,
             image_reference_definitions: Arc::default(),

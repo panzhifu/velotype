@@ -335,7 +335,7 @@ impl Editor {
                 let markdown = self.document.markdown_text(cx);
                 let block = Self::new_block(cx, BlockRecord::paragraph(markdown));
                 block.update(cx, |block, _cx| block.set_source_document_mode());
-                self.document.replace_roots(vec![block], cx);
+                self.replace_document_roots(vec![block], cx);
                 self.view_mode = ViewMode::Source;
                 self.table_cells.clear();
             }
@@ -345,7 +345,7 @@ impl Editor {
                 if roots.is_empty() {
                     roots.push(Self::new_block(cx, BlockRecord::paragraph(String::new())));
                 }
-                self.document.replace_roots(roots, cx);
+                self.replace_document_roots(roots, cx);
                 self.view_mode = ViewMode::Rendered;
                 self.rebuild_table_runtimes(cx);
                 self.rebuild_image_runtimes(cx);
@@ -369,8 +369,10 @@ impl Editor {
     /// Marks the document dirty and schedules window-title and edited-state
     /// refresh for the next render frame.
     pub(super) fn mark_dirty(&mut self, cx: &mut Context<Self>) {
-        // Every source mutation moves the source offsets of later blocks, so the stored
-        // selection snapshot must be treated as stale from now on.
+        // A handler can change the document more than once per block event, so the change
+        // is recorded here as well as at the head of the event: this is the point after the
+        // mutation where the cached whole-document text and the stored selection snapshot
+        // become stale.
         self.source_change_revision += 1;
         if !self.document_dirty {
             self.document_dirty = true;
