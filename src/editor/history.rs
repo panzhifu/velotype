@@ -192,8 +192,10 @@ impl Editor {
                 let Some(block) = self.document.first_root().cloned() else {
                     return;
                 };
-                let len = block.read(cx).visible_len();
-                let selected_range = snapshot.range.start.min(len)..snapshot.range.end.min(len);
+                let selected_range = crate::text_offsets::normalize_utf8_range(
+                    block.read(cx).display_text(),
+                    snapshot.range.clone(),
+                );
                 block.update(cx, move |block, cx| {
                     block.selected_range = selected_range.clone();
                     block.selection_reversed = snapshot.reversed;

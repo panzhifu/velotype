@@ -27,6 +27,7 @@ mod export;
 mod file_url;
 mod i18n;
 mod net;
+mod text_offsets;
 mod theme;
 mod window_chrome;
 

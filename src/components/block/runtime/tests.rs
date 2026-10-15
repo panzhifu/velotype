@@ -31,6 +31,58 @@ fn assert_only_code_range(block: &Block, expected: Range<usize>) {
 }
 
 #[gpui::test]
+async fn selection_offsets_inside_a_character_land_on_its_first_byte(cx: &mut TestAppContext) {
+    let cx = cx.add_empty_window();
+    let block = cx.new(|cx| {
+        Block::with_record(
+            cx,
+            BlockRecord::new(BlockKind::Paragraph, InlineTextTree::from_markdown("*测试")),
+        )
+    });
+
+    // Display bytes: `*` at 0, 测 at 1..4, 试 at 4..7. A pointer hit test that
+    // reports a byte in the middle of 测 must not become a selection endpoint, or
+    // every range derived from it spans a partial character.
+    block.update(cx, |block, cx| {
+        block.move_to(1, cx);
+        block.select_to(2, cx);
+        assert_eq!(block.selected_range, 1..1);
+        block.select_to(3, cx);
+        assert_eq!(block.selected_range, 1..1);
+        block.select_to(6, cx);
+        assert_eq!(block.selected_range, 1..4);
+    });
+
+    // The serialized markdown is `\*测试`: the escaping backslash shifts every CJK
+    // byte, so an interior visible byte has to convert to a position inside its own
+    // character rather than to 0, which would order the range backwards. A display
+    // range covering part of a character maps to that character's complete markdown
+    // bytes, keeping every mapped range a sliceable UTF-8 span.
+    block.read_with(cx, |block, _cx| {
+        let markdown = block
+            .record
+            .title
+            .markdown_offset_map()
+            .markdown()
+            .to_string();
+        let mapped = [
+            block.current_range_to_markdown_range(1..2),
+            block.current_range_to_markdown_range(1..3),
+            block.current_range_to_markdown_range(1..4),
+            block.current_range_to_markdown_range(4..6),
+            block.current_range_to_markdown_range(0..7),
+        ];
+        assert_eq!(mapped, [2..5, 2..5, 2..5, 5..8, 0..8]);
+        for range in mapped {
+            assert!(
+                markdown.get(range.clone()).is_some(),
+                "{markdown:?} has no slice {range:?}"
+            );
+        }
+    });
+}
+
+#[gpui::test]
 async fn tab_inserts_character_in_paragraph(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
     let block = cx.new(|cx| Block::with_record(cx, BlockRecord::paragraph("ab")));

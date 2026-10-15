@@ -902,7 +902,10 @@ impl InlineTextTree {
             } else if clamped >= fragment_end {
                 left.push(fragment.clone());
             } else {
-                let split_offset = clamp_to_char_boundary(&fragment.text, clamped - fragment_start);
+                let split_offset = crate::text_offsets::floor_char_boundary(
+                    &fragment.text,
+                    clamped - fragment_start,
+                );
                 if split_offset > 0 {
                     left.push(InlineFragment {
                         text: fragment.text[..split_offset].to_string(),
@@ -2653,7 +2656,11 @@ fn escaped_sequence_token_len(tokens: &[CharToken], index: usize) -> Option<usiz
 
 fn escape_literal_text_with_offset_map(text: &str) -> InlineMarkdownOffsetMap {
     let mut escaped = String::new();
-    let mut visible_to_markdown = vec![0; text.len() + 1];
+    // `usize::MAX` marks a slot the loop below never claims: a pass writes only the
+    // offset where it starts a sequence, so trailing bytes of an escaped tag and every
+    // byte after the first inside a multi-byte character stay unclaimed. Left at zero
+    // they map a range endpoint back to the start of the text and reverse the range.
+    let mut visible_to_markdown = vec![usize::MAX; text.len() + 1];
     let mut markdown_to_visible = vec![0];
     let mut index = 0;
 
@@ -2808,6 +2815,17 @@ fn escape_literal_text_with_offset_map(text: &str) -> InlineMarkdownOffsetMap {
     }
     visible_to_markdown[text.len()] = escaped.len();
     markdown_to_visible[escaped.len()] = text.len();
+
+    // Claim every unclaimed slot for the sequence that contains it, so the table is
+    // non-decreasing across all byte offsets and not just at sequence starts.
+    let mut previous_markdown_offset = 0;
+    for slot in &mut visible_to_markdown {
+        if *slot == usize::MAX {
+            *slot = previous_markdown_offset;
+        } else {
+            previous_markdown_offset = *slot;
+        }
+    }
 
     InlineMarkdownOffsetMap {
         markdown: escaped,
@@ -3184,19 +3202,6 @@ fn set_style_flag(mut style: InlineStyle, flag: StyleFlag, enabled: bool) -> Inl
     style
 }
 
-fn clamp_to_char_boundary(text: &str, offset: usize) -> usize {
-    let clamped = offset.min(text.len());
-    if text.is_char_boundary(clamped) {
-        return clamped;
-    }
-
-    let mut boundary = clamped;
-    while boundary > 0 && !text.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    boundary
-}
-
 fn can_open_emphasis(tokens: &[CharToken], index: usize, len: usize) -> bool {
     tokens
         .get(index + len)
@@ -3233,42 +3238,66 @@ mod tests {
     use crate::components::HtmlCssColor;
 
     #[test]
-    fn diag_asterisk_cjk_offset_map() {
-        let input = "*测试";
-        let tree = InlineTextTree::from_markdown(input);
-        let visible = tree.visible_text();
-        assert_eq!(visible, input, "visible text");
-        assert_eq!(
-            tree.fragments.len(),
-            1,
-            "expected single plain fragment, got {}",
-            tree.fragments.len()
-        );
-        for (i, f) in tree.fragments.iter().enumerate() {
-            eprintln!("fragment[{i}] text={:?} style={:?}", f.text, f.style);
-        }
-
-        let md = tree.serialize_markdown();
-        eprintln!("serialize_markdown = {md:?}");
+    fn escaped_cjk_text_maps_every_visible_byte_to_its_own_character() {
+        // `*测试` serializes to `\*测试`: the inserted backslash shifts every CJK byte,
+        // and the second and third byte of 测 and 试 have no markdown position of their
+        // own to map to.
+        let tree = InlineTextTree::from_markdown("*测试");
+        assert_eq!(tree.serialize_markdown(), "\\*测试");
         let map = tree.markdown_offset_map();
-        eprintln!("visible_len={} markdown_len={}", visible.len(), md.len());
-        for off in 0..=visible.len() {
-            let m = map.visible_to_markdown_offset(off);
-            eprintln!("visible_to_markdown[{off}] = {m}");
-        }
-        for off in 0..=md.len() {
-            let v = map.markdown_to_visible_offset(off);
-            eprintln!("markdown_to_visible[{off}] = {v}");
-        }
 
-        // Try slicing the serialized markdown for every adjacent visible offset pair
-        // (char-boundary and interior-byte) to detect non-char-boundary panics.
-        for start in 0..=visible.len() {
-            for end in start..=visible.len() {
-                let ms = map.visible_to_markdown_offset(start);
-                let me = map.visible_to_markdown_offset(end);
-                if ms <= me && me <= md.len() {
-                    let _ = md.get(ms..me).expect("slice should be on char boundary");
+        assert_eq!(map.visible_to_markdown_offset(0), 0);
+        assert_eq!(map.visible_to_markdown_offset(1), 2);
+        assert_eq!(map.visible_to_markdown_offset(2), 2);
+        assert_eq!(map.visible_to_markdown_offset(3), 2);
+        assert_eq!(map.visible_to_markdown_offset(4), 5);
+        assert_eq!(map.visible_to_markdown_offset(5), 5);
+        assert_eq!(map.visible_to_markdown_offset(6), 5);
+        assert_eq!(map.visible_to_markdown_offset(7), 8);
+    }
+
+    #[test]
+    fn offset_ranges_never_reverse_or_split_a_character() {
+        let literal_tag = InlineTextTree::from_fragments(vec![InlineFragment {
+            text: "<strong>测试".to_string(),
+            style: InlineStyle::default(),
+            html_style: None,
+            link: None,
+            footnote: None,
+            math: None,
+        }]);
+        let trees = [
+            InlineTextTree::from_markdown("*测试"),
+            InlineTextTree::from_markdown("测试*测试_测试"),
+            InlineTextTree::from_markdown("**测试**and*测试*"),
+            InlineTextTree::from_markdown("a\\*测试"),
+            literal_tag,
+        ];
+
+        for tree in trees {
+            let visible = tree.visible_text().to_string();
+            let markdown = tree.serialize_markdown();
+            let map = tree.markdown_offset_map();
+
+            for offset in 1..=visible.len() {
+                let previous = map.visible_to_markdown_offset(offset - 1);
+                let current = map.visible_to_markdown_offset(offset);
+                assert!(
+                    current >= previous,
+                    "{visible:?}: offset {offset} maps to {current}, \
+                     which is before offset {}'s {previous}",
+                    offset - 1
+                );
+            }
+
+            for start in 0..=visible.len() {
+                for end in start..=visible.len() {
+                    let range = map.visible_to_markdown_range(start..end);
+                    assert!(
+                        markdown.get(range.clone()).is_some(),
+                        "{visible:?}: visible {start}..{end} maps to markdown {range:?}, \
+                         which does not slice {markdown:?}"
+                    );
                 }
             }
         }
